@@ -33,8 +33,8 @@
   // ─── GESTURE / CAMERA STATE ─────────────────────────────────────
   //let canvasEl      = $state(null);
   //let videoEl       = $state(null); // Reference to the video element
-  let canvasEl; 
-  let videoEl;
+  let canvasEl      = $state('');; 
+  let videoEl       = $state('');;
   let hands         = $state([]);
   let camStatus     = $state('idle');
   let mlStatus      = $state('idle');
@@ -222,16 +222,33 @@
   }
 
   // ─── SPOTIFY API ────────────────────────────────────────────────
-  async function api(endpoint, method = 'GET', body = null) {
-    const opts = {
-      method,
-      headers: { Authorization: `Bearer ${spotToken}`, 'Content-Type': 'application/json' }
+ 
+  const scopes = [
+  'user-modify-playback-state', // REQUIRED for the PUT /play command
+  'user-read-playback-state',   // Required to see active devices
+  'user-top-read'               // Required to get your Artist #1
+].join(' ');
+
+// Ensure this is exactly what is sent to the Spotify Auth URL
+async function api(endpoint, method = 'GET', body = null) {
+    // DEBUG: Add this line to see if the token is actually there when you gesture
+    if (!spotToken) {
+      console.error("API Error: spotToken is empty!");
+      addLog('System', 'Auth Token Missing');
+      return null;
+    }
+
+    const opts = { 
+      method, 
+      headers: { 
+        'Authorization': `Bearer ${spotToken}`, // This is where the 401 triggers if spotToken is null
+        'Content-Type': 'application/json' 
+      }
     };
     if (body) opts.body = JSON.stringify(body);
+
     const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
-    if (res.status === 204 || res.status === 202) return null;
-    if (!res.ok) throw new Error(`Spotify API error: ${res.status}`);
-    return res.json();
+    return res.status < 300 ? res.json().catch(() => ({})) : null;
   }
 
 
@@ -291,7 +308,7 @@
   async function spotifyPlay(contextUri = null) {
     try {
       const body = contextUri ? { context_uri: contextUri } : {};
-      await api('/me/player/play', 'PUT', body);
+      await api('/me/player/play', 'PUT', { uris: [artistUri] });
       isPlaying = true;
       addLog('Spotify', 'Playback started');
     } catch (e) {
@@ -311,6 +328,13 @@
 
  async function spotifyPlayArtist(idx) {
     const artist = topArtists[idx];
+    if (!artist) {
+    addLog('Spotify', `Error: Artist data for #${idx + 1} is missing.`);
+    console.log("Current topArtists array:", topArtists);
+    return;
+  }
+
+  addLog('Spotify', `🎤 Attempting to play: ${artist.name}`);
     if (!artist || !activeDeviceId) {
       addLog('Spotify', 'Error: No active device found. Open Spotify!');
       return;
@@ -330,6 +354,7 @@
     }
   }
 
+  
   async function spotifyNext() {
     try { await api('/me/player/next', 'POST'); addLog('Spotify', 'Next'); } catch (e) {}
   }
@@ -342,50 +367,51 @@
     volume = Math.max(0, Math.min(100, volume + delta));
     await api(`/me/player/volume?volume_percent=${volume}`, 'PUT').catch(() => {});
   }
-
-  function classifyGesture(kps) {
+  
+    function classifyGesture(kps) {
     if (!kps || kps.length < 21) return null;
-
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const palmSize = dist(kps[0], kps[9]);
-    const isUp = (tip, pip) => dist(kps[tip], kps[0]) > dist(kps[pip], kps[0]) + (palmSize * 0.15);
+    const isUp = (tip, pip) => dist(kps[tip], kps[0]) > dist(kps[pip], kps[0]) + (palmSize * 0.2);
 
-    // Track which fingers are "Up"
     const f = [
-      dist(kps[4], kps[0]) > dist(kps[2], kps[0]) + (palmSize * 0.1), // Thumb
-      isUp(8, 6),   // Index
-      isUp(12, 10), // Middle
-      isUp(16, 14), // Ring
-      isUp(20, 18)  // Pinky
+      dist(kps[4], kps[0]) > dist(kps[2], kps[0]) + (palmSize * 0.1), // Thumb (f[0])
+      isUp(8, 6),   // Index (f[1])
+      isUp(12, 10), // Middle (f[2])
+      isUp(16, 14), // Ring (f[3])
+      isUp(20, 18)  // Pinky (f[4])
     ];
 
-    // THE FIX: Declare fingerCount ONLY ONCE here
-    const fingerCount = f.slice(1).filter(Boolean).length;
-    const totalCount = f.filter(Boolean).length;
+    const fingerCount = f.slice(1).filter(Boolean).length; // Only 4 fingers
+    const totalCount = f.filter(Boolean).length;           // All 5 digits
 
-    // ─── ✊ PAUSE ───
-    if (totalCount === 0) return { name: 'fist', emoji: '✊', label: 'Pause' };
-
-    // ─── ✋ PLAY (Open Hand) ───
-    if (fingerCount >= 3) return { name: 'open_hand', emoji: '✋', label: 'Play' };
-
-    // ─── 👍 VOL + / 👎 VOL - ───
-    if (totalCount === 1 && f[0]) {
-      return kps[4].y < kps[2].y ? { name: 'vol_up', emoji: '👍', label: 'Vol +' } : { name: 'vol_down', emoji: '👎', label: 'Vol -' };
+    // --- CATEGORY 1: THUMB TUCKED (Artist Selection) ---
+    if (!f[0]) {
+      if (fingerCount >= 1 && fingerCount <= 4) {
+        const names = ['one_finger', 'two_fingers', 'three_fingers', 'four_fingers'];
+        return { name: names[fingerCount - 1], emoji: '☝️', label: `Artist #${fingerCount}` };
+      }
+      if (fingerCount === 0) {
+        return { name: 'fist', emoji: '✊', label: 'Pause' };
+      }
     }
 
-    // ─── 👉 NEXT / 👈 PREV ───
-    if (fingerCount === 1 && f[1]) {
-      const horizontalDiff = kps[8].x - kps[5].x;
-      if (horizontalDiff > 45) return { name: 'next', emoji: '👉', label: 'Next' };
-      if (horizontalDiff < -45) return { name: 'prev', emoji: '👈', label: 'Prev' };
-    }
+    // --- CATEGORY 2: THUMB EXTENDED (Navigation & Play) ---
+    if (f[0]) {
+      // 5 digits up = Play
+      if (totalCount === 5) return { name: 'open_hand', emoji: '✋', label: 'Play' };
+      
+      // Thumb only = Volume
+      if (fingerCount === 0) {
+        return kps[4].y < kps[2].y ? { name: 'vol_up', emoji: '👍', label: 'Vol +' } : { name: 'vol_down', emoji: '👎', label: 'Vol -' };
+      }
 
-    // ─── ☝️ TOP ARTISTS (1-4) ───
-    if (!f[0] && fingerCount >= 1 && fingerCount <= 4) {
-      const labels = ['Artist #1', 'Artist #2', 'Artist #3', 'Artist #4'];
-      const names = ['one_finger', 'two_fingers', 'three_fingers', 'four_fingers'];
-      return { name: names[fingerCount - 1], emoji: '☝️', label: labels[fingerCount - 1] };
+      // Thumb + Index = Next/Prev (Ignore other fingers for stability)
+      if (f[1]) {
+        const horizontalDiff = kps[8].x - kps[5].x;
+        if (horizontalDiff > 45) return { name: 'next', emoji: '👉', label: 'Next' };
+        if (horizontalDiff < -45) return { name: 'prev', emoji: '👈', label: 'Prev' };
+      }
     }
 
     return null;
