@@ -28,6 +28,7 @@
   let spotStatus    = $state('idle');
   let pollTimer     = null;
   let embedSrc      = $state(null);
+  let activeDeviceId = $state(null);
 
   // ─── GESTURE / CAMERA STATE ─────────────────────────────────────
   //let canvasEl      = $state(null);
@@ -97,6 +98,7 @@
 
   function loginWithSpotify() {
     window.location.href = '/auth/callback';
+    
   }
 
   // ─── CAMERA ─────────────────────────────────────────────────────
@@ -232,16 +234,26 @@
     return res.json();
   }
 
+
   async function initSpotify() {
     try {
       const me = await api('/me');
       spotStatus = 'active';
       addLog('Spotify', `Connected as ${me.display_name}`);
-      await fetchTopArtists(); // Populates topArtists state
+      
+      // Get the list of available devices
+      const devices = await api('/me/player/devices');
+      if (devices?.devices?.length > 0) {
+        // Find the first active device, or just take the first one available
+        const active = devices.devices.find(d => d.is_active) || devices.devices[0];
+        activeDeviceId = active.id;
+        addLog('Spotify', `Targeting: ${active.name}`);
+      }
+      
+      await fetchTopArtists(); 
       startPoll();
     } catch (e) {
       spotStatus = 'error';
-      addLog('Spotify', `API Error: ${e.message}`);
     }
   }
 
@@ -297,14 +309,25 @@
     } catch (e) { addLog('Spotify', 'Pause Error'); }
   }
 
-  async function spotifyPlayArtist(idx) {
+ async function spotifyPlayArtist(idx) {
     const artist = topArtists[idx];
-    if (!artist) return;
+    if (!artist || !activeDeviceId) {
+      addLog('Spotify', 'Error: No active device found. Open Spotify!');
+      return;
+    }
+    
     try {
-      const d = await api(`/artists/${artist.id}/top-tracks?market=US`);
-      await api('/me/player/play', 'PUT', { uris: d.tracks.slice(0, 10).map(t => t.uri) });
-      addLog('Spotify', `🎤 ${artist.name}`);
-    } catch (e) { addLog('Spotify', 'Artist Error'); }
+      const data = await api(`/artists/${artist.id}/top-tracks?market=US`);
+      if (data?.tracks) {
+        const uris = data.tracks.slice(0, 10).map(t => t.uri);
+        
+        // Force playback on the specific device we found
+        await api(`/me/player/play?device_id=${activeDeviceId}`, 'PUT', { uris });
+        addLog('Spotify', `🎤 Playing: ${artist.name}`);
+      }
+    } catch (e) {
+      addLog('Spotify', 'Playback failed');
+    }
   }
 
   async function spotifyNext() {
@@ -321,13 +344,13 @@
   }
 
   function classifyGesture(kps) {
-    if (!kps) return null;
+    if (!kps || kps.length < 21) return null;
+
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const palmSize = dist(kps[0], kps[9]);
-    
-    // Stricter "Up" check: Tip must be much further from wrist than the joint
-    const isUp = (tip, pip) => dist(kps[tip], kps[0]) > dist(kps[pip], kps[0]) + (palmSize * 0.2);
+    const isUp = (tip, pip) => dist(kps[tip], kps[0]) > dist(kps[pip], kps[0]) + (palmSize * 0.15);
 
+    // Track which fingers are "Up"
     const f = [
       dist(kps[4], kps[0]) > dist(kps[2], kps[0]) + (palmSize * 0.1), // Thumb
       isUp(8, 6),   // Index
@@ -335,28 +358,34 @@
       isUp(16, 14), // Ring
       isUp(20, 18)  // Pinky
     ];
-    
-    // Finger count excluding the thumb
+
+    // THE FIX: Declare fingerCount ONLY ONCE here
     const fingerCount = f.slice(1).filter(Boolean).length;
+    const totalCount = f.filter(Boolean).length;
 
-    // ─── ✊ PAUSE (Everything tucked, including thumb) ───
-    if (!f[0] && fingerCount === 0) return { name: 'fist', emoji: '✊', label: 'Pause' };
+    // ─── ✊ PAUSE ───
+    if (totalCount === 0) return { name: 'fist', emoji: '✊', label: 'Pause' };
 
-    // ─── 👉 NEXT / 👈 PREV (Index UP, others DOWN) ───
-    // We ignore the thumb (f[0]) so you can tuck it in or leave it out
+    // ─── ✋ PLAY (Open Hand) ───
+    if (fingerCount >= 3) return { name: 'open_hand', emoji: '✋', label: 'Play' };
+
+    // ─── 👍 VOL + / 👎 VOL - ───
+    if (totalCount === 1 && f[0]) {
+      return kps[4].y < kps[2].y ? { name: 'vol_up', emoji: '👍', label: 'Vol +' } : { name: 'vol_down', emoji: '👎', label: 'Vol -' };
+    }
+
+    // ─── 👉 NEXT / 👈 PREV ───
     if (fingerCount === 1 && f[1]) {
-      // Logic: Index Tip (8) vs Index Base (5)
       const horizontalDiff = kps[8].x - kps[5].x;
       if (horizontalDiff > 45) return { name: 'next', emoji: '👉', label: 'Next' };
       if (horizontalDiff < -45) return { name: 'prev', emoji: '👈', label: 'Prev' };
     }
 
-    // ─── ✋ PLAY (Full Open Hand) ───
-    if (fingerCount >= 3) return { name: 'open_hand', emoji: '✋', label: 'Play' };
-
-    // ─── 👍 VOL + / 👎 VOL - (Thumb Only) ───
-    if (f[0] && fingerCount === 0) {
-      return kps[4].y < kps[2].y ? { name: 'vol_up', emoji: '👍', label: 'Vol +' } : { name: 'vol_down', emoji: '👎', label: 'Vol -' };
+    // ─── ☝️ TOP ARTISTS (1-4) ───
+    if (!f[0] && fingerCount >= 1 && fingerCount <= 4) {
+      const labels = ['Artist #1', 'Artist #2', 'Artist #3', 'Artist #4'];
+      const names = ['one_finger', 'two_fingers', 'three_fingers', 'four_fingers'];
+      return { name: names[fingerCount - 1], emoji: '☝️', label: labels[fingerCount - 1] };
     }
 
     return null;
@@ -390,8 +419,11 @@
     else if (g.name === 'prev') spotifyPrev();
     else if (g.name === 'vol_up') spotifyAdjVol(10);
     else if (g.name === 'vol_down') spotifyAdjVol(-10);
+    // Add these to your if/else if chain in classifyAndAct
     else if (g.name === 'one_finger') spotifyPlayArtist(0);
     else if (g.name === 'two_fingers') spotifyPlayArtist(1);
+    else if (g.name === 'three_fingers') spotifyPlayArtist(2);
+    else if (g.name === 'four_fingers') spotifyPlayArtist(3);
   }
 
   function showFlash(msg) {
@@ -454,31 +486,6 @@
     <p class="mt-3 text-[0.64rem] tracking-[0.25em] uppercase text-[#666680]">
       ml5.js HandPose · Spotify Web API · SvelteKit + Tailwind
     </p>
-  </div>
-
-  <!-- Gesture ref -->
-  <div class="bg-[#111116] border border-[#222230] p-6 max-w-2xl w-full">
-    <p class="font-display font-black text-[0.58rem] tracking-[0.2em] uppercase text-[#666680] mb-4">
-      Gesture Map — No Training Required
-    </p>
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {#each [
-        ['✊','Fist','Pause'],['✋','Open Hand','Play'],
-        ['👉','Point Right','Next Track'],['👈','Point Left','Prev Track'],
-        ['👍','Thumb Up','Vol +10'],['👎','Thumb Down','Vol −10'],
-        ['☝️','1 Finger','Top Artist #1'],['✌️','2 Fingers','Top Artist #2'],
-        ['🤟','3 Fingers','Top Artist #3'],['🖖','4 Fingers','Top Artist #4'],
-        ['🖐️','5 / Open','Top Artist #5'],
-      ] as [e, n, a]}
-        <div class="bg-[#08080b] border border-[#222230] px-3 py-2 flex items-center gap-2.5">
-          <span class="text-xl w-7 text-center flex-shrink-0">{e}</span>
-          <div>
-            <div class="font-display font-bold text-[0.6rem] text-white leading-snug">{n}</div>
-            <div class="text-[0.56rem] text-[#4a4a60]">{a}</div>
-          </div>
-        </div>
-      {/each}
-    </div>
   </div>
 
   <!-- Login -->
