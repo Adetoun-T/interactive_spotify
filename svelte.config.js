@@ -18,3 +18,13 @@ const config = {
 };
 
 export default config;
+
+const config = {
+  kit: {
+    adapter: adapter({ fallback: '404.html' }),
+    paths: {
+      // This tells Svelte "I live inside this folder!"
+      base: process.env.NODE_ENV === 'production' ? '/interactive-spotify' : '',
+    }
+  }
+};
