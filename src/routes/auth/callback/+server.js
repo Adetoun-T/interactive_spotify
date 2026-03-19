@@ -2,7 +2,12 @@ import { redirect } from '@sveltejs/kit';
 import { CLIENT_ID, CLIENT_SECRET } from '$env/static/private';
 
 // Match this EXACTLY to your Spotify Dashboard
-const REDIRECT_URI = 'http://127.0.0.1:5173/auth/callback';
+import { base } from '$app/paths';
+import { dev } from '$app/environment';
+
+// This dynamically builds the URL based on where the site is running
+const domain = dev ? 'http://localhost:5173' : 'https://adetoun-t.github.io';
+const redirect_uri = `${domain}${base}/auth/callback`;
 
 export async function GET({ url }) {
   const code = url.searchParams.get('code');
