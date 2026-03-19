@@ -12,7 +12,7 @@ const config = {
         }),
         paths: {
             // Using the dash to match your repo name
-            base: process.env.NODE_ENV === 'production' ? '/interactive-spotify' : '',
+            base: process.env.NODE_ENV === 'production' ? '/interactive_spotify' : '',
         }
     }
 };
