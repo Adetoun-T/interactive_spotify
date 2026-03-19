@@ -32,9 +32,9 @@
 
   // ─── GESTURE / CAMERA STATE ─────────────────────────────────────
   //let canvasEl      = $state(null);
-  //let videoEl       = $state(null); // Reference to the video element
-  let canvasEl      = $state('');; 
-  let videoEl       = $state('');;
+  //let videoEl       = $state(null);
+  let canvasEl      = $state('');
+  let videoEl       = $state('');
   let hands         = $state([]);
   let camStatus     = $state('idle');
   let mlStatus      = $state('idle');
@@ -44,7 +44,7 @@
   let flashTimer    = null;
   let animFrame     = null;
 
-  let lastGesture     = null;
+  let lastGesture     = $state('');
   let lastGestureTime = 0;
   const COOLDOWN      = 1500;
 
@@ -223,34 +223,44 @@
 
   // ─── SPOTIFY API ────────────────────────────────────────────────
  
-  const scopes = [
-  'user-modify-playback-state', // REQUIRED for the PUT /play command
-  'user-read-playback-state',   // Required to see active devices
-  'user-top-read'               // Required to get your Artist #1
-].join(' ');
-
-// Ensure this is exactly what is sent to the Spotify Auth URL
-async function api(endpoint, method = 'GET', body = null) {
-    // DEBUG: Add this line to see if the token is actually there when you gesture
+  // ─── SPOTIFY API (REPLACED & CLEANED) ───────────────────────────
+  async function api(endpoint, method = 'GET', body = null) {
     if (!spotToken) {
       console.error("API Error: spotToken is empty!");
-      addLog('System', 'Auth Token Missing');
       return null;
     }
 
-    const opts = { 
-      method, 
-      headers: { 
-        'Authorization': `Bearer ${spotToken}`, // This is where the 401 triggers if spotToken is null
-        'Content-Type': 'application/json' 
+    const opts = {
+      method,
+      headers: {
+        'Authorization': `Bearer ${spotToken}`,
+        'Content-Type': 'application/json'
       }
     };
     if (body) opts.body = JSON.stringify(body);
 
-    const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
-    return res.status < 300 ? res.json().catch(() => ({})) : null;
-  }
+    try {
+      const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
 
+      // 1. Handle "No Content" success (204/202) - prevents the 500 crash
+      if (res.status === 204 || res.status === 202) return { success: true };
+
+      // 2. Handle Errors
+      if (!res.ok) {
+        const errorDetail = await res.json().catch(() => ({}));
+        console.error(`Spotify Error ${res.status}:`, errorDetail);
+        return null;
+      }
+
+      // 3. Parse JSON only if content exists
+      return await res.json().catch(() => ({}));
+    } catch (err) {
+      console.error("Fetch failed:", err);
+      return null;
+    }
+    // Change the fetch URL to the direct Spotify API
+      const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
+  }
 
   async function initSpotify() {
     try {
@@ -308,7 +318,7 @@ async function api(endpoint, method = 'GET', body = null) {
   async function spotifyPlay(contextUri = null) {
     try {
       const body = contextUri ? { context_uri: contextUri } : {};
-      await api('/me/player/play', 'PUT', { uris: [artistUri] });
+      await api('/me/player/play', 'PUT', body);
       isPlaying = true;
       addLog('Spotify', 'Playback started');
     } catch (e) {
@@ -326,34 +336,36 @@ async function api(endpoint, method = 'GET', body = null) {
     } catch (e) { addLog('Spotify', 'Pause Error'); }
   }
 
- async function spotifyPlayArtist(idx) {
-    const artist = topArtists[idx];
-    if (!artist) {
-    addLog('Spotify', `Error: Artist data for #${idx + 1} is missing.`);
-    console.log("Current topArtists array:", topArtists);
+async function spotifyPlayArtist(idx) {
+  const artist = topArtists[idx];
+  
+  // 1. Refetch devices if activeDeviceId is missing
+  if (!activeDeviceId) {
+    const devices = await api('/me/player/devices');
+    const active = devices?.devices?.find(d => d.is_active) || devices?.devices?.[0];
+    if (active) activeDeviceId = active.id;
+  }
+
+  if (!artist || !activeDeviceId) {
+    addLog('Spotify', 'Error: No active device found. Play a song manually first!');
     return;
   }
 
-  addLog('Spotify', `🎤 Attempting to play: ${artist.name}`);
-    if (!artist || !activeDeviceId) {
-      addLog('Spotify', 'Error: No active device found. Open Spotify!');
-      return;
+  try {
+    const data = await api(`/artists/${artist.id}/top-tracks?market=from_token`);
+    if (data?.tracks) {
+      const uris = data.tracks.slice(0, 10).map(t => t.uri);
+      
+      // 2. Log the exact URL for debugging
+      console.log(`Triggering play on device: ${activeDeviceId}`);
+      
+      await api(`/me/player/play?device_id=${activeDeviceId}`, 'PUT', { uris });
+      addLog('Spotify', `🎤 Playing: ${artist.name}`);
     }
-    
-    try {
-      const data = await api(`/artists/${artist.id}/top-tracks?market=US`);
-      if (data?.tracks) {
-        const uris = data.tracks.slice(0, 10).map(t => t.uri);
-        
-        // Force playback on the specific device we found
-        await api(`/me/player/play?device_id=${activeDeviceId}`, 'PUT', { uris });
-        addLog('Spotify', `🎤 Playing: ${artist.name}`);
-      }
-    } catch (e) {
-      addLog('Spotify', 'Playback failed');
-    }
+  } catch (e) {
+    addLog('Spotify', 'Playback trigger failed');
   }
-
+}
   
   async function spotifyNext() {
     try { await api('/me/player/next', 'POST'); addLog('Spotify', 'Next'); } catch (e) {}

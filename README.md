@@ -6,18 +6,17 @@ A touchless, hand-tracking interface that transforms physical gestures into real
 ---
 
 ## Project Description
-**GESTURE** is an interactive web application that bridges the gap between physical movement and digital audio control. By leveraging the **ml5.js HandPose** model, the system tracks 21 skeletal hand landmarks to interpret user intent—allowing for seamless music navigation and favorite artist selection without a keyboard or mouse.
+**GESTURE** is an interactive web application that bridges the gap between physical movement and digital audio control. By leveraging the **ml5.js HandPose** model, the system tracks 21 skeletal hand landmarks to interpret user intent—allowing for seamless music navigation selection without a keyboard or mouse.
 
 ### Key Features
 * **Touchless Playback**: Fist gesture to Pause; Open hand to Play.
 * **Analog Volume Control**: Vertical thumb orientation (Thumbs Up/Down) for incremental volume adjustments.
-* **Dynamic Artist Selection**: Discrete finger-counting logic (1–4 fingers) to instantly trigger playback of the user's top-ranked artists.
 * **Visual Feedback Loop**: Real-time skeletal overlay and "Flash" notifications to confirm gesture recognition.
 
 ---
 
 ## Target Audience
-This project is designed for users in "dirty-hand" environments (cooking, painting, workshops) where touching a device is impractical. It also serves as a research prototype for **Human-Computer Interaction (HCI)**, exploring how computer vision can provide accessible alternatives for users with limited motor control.
+This project is designed for users in "dirty-hand" environments (cooking, painting, workshops) where touching a device is impractical. 
 
 ---
 
