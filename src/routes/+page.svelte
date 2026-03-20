@@ -8,7 +8,10 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import { replaceState } from '$app/navigation'; // Add this import
+  import { replaceState } from '$app/navigation'; /
+
+  import { base } from '$app/paths';
+  import { PUBLIC_CLIENT_ID } from '$env/static/public';
 
   // ─── APP PHASE ──────────────────────────────────────────────────
   let phase = $state('setup');
@@ -61,17 +64,43 @@
   let albumArt = $derived(currentTrack?.album?.images?.[0]?.url ?? null);
 
   // ─── OAUTH & LAUNCH ─────────────────────────────────────────────
-  onMount(async () => {
+  
+onMount(async () => {
+  
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+
+    if (accessToken) {
+      addLog('Auth', 'Access Token received via Redirect!');
+      tokenInput = accessToken; 
+      
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      
+      await launch();
+      return; 
+    }
+
+  
     const urlToken = $page.url.searchParams.get('token');
     if (urlToken) {
       tokenInput = urlToken;
-      addLog('Auth', 'Token received, auto-launching...');
-      await launch();
+      addLog('Auth', 'Manual token detected, auto-launching...');
+      
       const url = new URL(window.location);
       url.searchParams.delete('token');
       window.history.replaceState({}, '', url);
+      
+      await launch();
     }
   });
+
+  function loginWithSpotify() {
+    const scope = 'user-read-private user-read-email user-modify-playback-state user-read-playback-state user-top-read';
+    const redirectUri = `${window.location.origin}${base}/`;
+    
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${PUBLIC_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;    window.location.href = authUrl;
+  }
 
   async function launch() {
     if (!tokenInput || !tokenInput.trim()) {
@@ -99,10 +128,7 @@
 
 import { base } from '$app/paths';
 
-function loginWithSpotify() {
-  // We add 'base' for the folder name and a '/' at the end for the trailing slash
-  window.location.href = `${base}/auth/callback/`;
-}
+import { base } from '$app/paths';
 
   // ─── CAMERA ─────────────────────────────────────────────────────
   async function initCamera() {
@@ -244,7 +270,7 @@ function loginWithSpotify() {
 
     try {
       const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
-
+      
       // 1. Handle "No Content" success (204/202) - prevents the 500 crash
       if (res.status === 204 || res.status === 202) return { success: true };
 
