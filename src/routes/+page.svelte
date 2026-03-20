@@ -96,12 +96,12 @@
     }
   }
 
+
 import { base } from '$app/paths';
 
 function loginWithSpotify() {
-  // This will become '/interactive-spotify/auth/callback' on GitHub
-  // and just '/auth/callback' when you are working locally.
-  window.location.href = `${base}/auth/callback`;
+  // We add 'base' for the folder name and a '/' at the end for the trailing slash
+  window.location.href = `${base}/auth/callback/`;
 }
 
   // ─── CAMERA ─────────────────────────────────────────────────────
