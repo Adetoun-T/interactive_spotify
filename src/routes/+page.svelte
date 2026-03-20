@@ -96,10 +96,13 @@
     }
   }
 
-  function loginWithSpotify() {
-    window.location.href = '/auth/callback';
-    
-  }
+import { base } from '$app/paths';
+
+function loginWithSpotify() {
+  // This will become '/interactive-spotify/auth/callback' on GitHub
+  // and just '/auth/callback' when you are working locally.
+  window.location.href = `${base}/auth/callback`;
+}
 
   // ─── CAMERA ─────────────────────────────────────────────────────
   async function initCamera() {
