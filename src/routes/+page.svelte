@@ -8,7 +8,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import { replaceState } from '$app/navigation'; /
+  import { replaceState } from '$app/navigation'; 
 
   import { base } from '$app/paths';
   import { PUBLIC_CLIENT_ID } from '$env/static/public';
@@ -126,9 +126,7 @@ onMount(async () => {
   }
 
 
-import { base } from '$app/paths';
 
-import { base } from '$app/paths';
 
   // ─── CAMERA ─────────────────────────────────────────────────────
   async function initCamera() {
@@ -287,8 +285,6 @@ import { base } from '$app/paths';
       console.error("Fetch failed:", err);
       return null;
     }
-    // Change the fetch URL to the direct Spotify API
-      const res = await fetch(`https://api.spotify.com/v1${endpoint}`, opts);
   }
 
   async function initSpotify() {
